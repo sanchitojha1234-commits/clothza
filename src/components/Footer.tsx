@@ -3,7 +3,7 @@ import { useMarketplace } from '../context/MarketplaceContext';
 import { ExternalLink, ShieldCheck, CreditCard, Sparkles } from 'lucide-react';
 
 export const Footer: React.FC = () => {
-  const { navigateToHome, navigateToDashboard } = useMarketplace();
+  const { navigateToHome, navigateToDashboard, navigateToPrivacy, navigateToTerms } = useMarketplace();
 
   return (
     <footer className="w-full bg-bg-secondary border-t border-border-main mt-auto">
@@ -89,7 +89,19 @@ export const Footer: React.FC = () => {
           <div>
             &copy; {new Date().getFullYear()} Clothza Inc. Built with love and architectural precision.
           </div>
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-4 flex-wrap justify-center sm:justify-end gap-y-2">
+            <span 
+              onClick={navigateToPrivacy} 
+              className="hover:text-text-primary hover:underline cursor-pointer"
+            >
+              Privacy Policy
+            </span>
+            <span 
+              onClick={navigateToTerms} 
+              className="hover:text-text-primary hover:underline cursor-pointer"
+            >
+              Terms & Conditions
+            </span>
             <span 
               onClick={navigateToDashboard} 
               className="hover:text-text-primary hover:underline cursor-pointer"

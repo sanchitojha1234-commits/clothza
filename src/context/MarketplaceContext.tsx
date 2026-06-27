@@ -150,7 +150,7 @@ interface MarketplaceContextType {
     stores: string[];
   };
   recentlyViewed: string[];
-  currentPage: 'home' | 'store' | 'product' | 'dashboard' | 'admin' | 'checkout' | 'customer-orders' | 'lookbooks';
+  currentPage: 'home' | 'store' | 'product' | 'dashboard' | 'admin' | 'checkout' | 'customer-orders' | 'lookbooks' | 'privacy' | 'terms';
   activeStoreSlug: string | null;
   activeProductId: string | null;
   cart: CartItem[];
@@ -165,6 +165,8 @@ interface MarketplaceContextType {
   navigateToCheckout: () => void;
   navigateToCustomerOrders: () => void;
   navigateToLookbooks: () => void;
+  navigateToPrivacy: () => void;
+  navigateToTerms: () => void;
   registerStore: (storeData: Omit<Store, 'id' | 'ownerId' | 'views' | 'clicks' | 'isFeatured' | 'isSponsored'>) => Promise<Store>;
   updateStore: (storeId: string, storeData: Partial<Store>) => Promise<void>;
   addProduct: (storeId: string, productData: Omit<Product, 'id' | 'storeId' | 'views' | 'clicks' | 'createdAt'>) => Promise<Product>;
@@ -773,7 +775,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     stores: [],
   });
   const [recentlyViewed, setRecentlyViewed] = useState<string[]>([]);
-  const [currentPage, setCurrentPage] = useState<'home' | 'store' | 'product' | 'dashboard' | 'admin' | 'checkout' | 'customer-orders' | 'lookbooks'>('home');
+  const [currentPage, setCurrentPage] = useState<'home' | 'store' | 'product' | 'dashboard' | 'admin' | 'checkout' | 'customer-orders' | 'lookbooks' | 'privacy' | 'terms'>('home');
   const [activeStoreSlug, setActiveStoreSlug] = useState<string | null>(null);
   const [activeProductId, setActiveProductId] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -825,6 +827,20 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const navigateToLookbooks = () => {
     setCurrentPage('lookbooks');
+    setActiveStoreSlug(null);
+    setActiveProductId(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const navigateToPrivacy = () => {
+    setCurrentPage('privacy');
+    setActiveStoreSlug(null);
+    setActiveProductId(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const navigateToTerms = () => {
+    setCurrentPage('terms');
     setActiveStoreSlug(null);
     setActiveProductId(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1815,6 +1831,8 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         updateStoreSubscription,
         uploadImage,
         navigateToLookbooks,
+        navigateToPrivacy,
+        navigateToTerms,
       }}
     >
       {children}

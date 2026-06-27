@@ -11,6 +11,8 @@ import { Checkout } from './pages/Checkout';
 import { CustomerOrders } from './pages/CustomerOrders';
 import { Lookbooks } from './pages/Lookbooks';
 import { AuthModal } from './components/AuthModal';
+import { PrivacyPolicy } from './pages/PrivacyPolicy';
+import { TermsOfService } from './pages/TermsOfService';
 
 function RestrictedAccess({ requiredRole, onLogin }: { requiredRole: string; onLogin: () => void }) {
   return (
@@ -74,6 +76,12 @@ function AppContent() {
     } else if (currentPage === 'lookbooks') {
       title = 'Shoppable Lookbooks | Clothza';
       metaDescription = 'Explore curated fashion edits and styling lookbooks by independent boutique designers on Clothza.';
+    } else if (currentPage === 'privacy') {
+      title = 'Privacy Policy | Clothza';
+      metaDescription = 'Read the Clothza Privacy Policy regarding user accounts, boutique data, and transactional security.';
+    } else if (currentPage === 'terms') {
+      title = 'Terms & Conditions | Clothza';
+      metaDescription = 'Read the Clothza Terms and Conditions governing SaaS subscriptions, boutique hosting, and catalog moderation.';
     }
 
     document.title = title;
@@ -106,6 +114,8 @@ function AppContent() {
         {currentPage === 'lookbooks' && <Lookbooks />}
         {currentPage === 'store' && <StorePage />}
         {currentPage === 'product' && <ProductPage />}
+        {currentPage === 'privacy' && <PrivacyPolicy />}
+        {currentPage === 'terms' && <TermsOfService />}
         
         {currentPage === 'dashboard' && (
           currentUser?.role === 'seller' ? (
