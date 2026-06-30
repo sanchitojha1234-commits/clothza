@@ -216,6 +216,7 @@ interface MarketplaceContextType {
   submitAdminRequest: (userId: string) => Promise<void>;
   approveAdminRequest: (userId: string, approve: boolean) => Promise<void>;
   promoteToSellerDirect: (userId: string) => Promise<void>;
+  unlockAdminAccess: (password: string) => boolean;
 }
 
 const MarketplaceContext = createContext<MarketplaceContextType | undefined>(undefined);
@@ -773,8 +774,18 @@ const mapDbProfileToUser = (p: any): User => ({
 export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [stores, setStores] = useState<Store[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [users, setUsers] = useState<User[]>([
+    { id: 'user-1', name: 'Alisha Thapa', email: 'alisha@example.com', role: 'customer', adminRequest: 'none' },
+    { id: 'user-2', name: 'Sanchit Ojha', email: 'sanchit@example.com', role: 'customer', adminRequest: 'none' },
+    { id: 'user-3', name: 'Rohan Shrestha', email: 'rohan@example.com', role: 'customer', adminRequest: 'none' }
+  ]);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    const isAdmin = localStorage.getItem('clothza_admin_logged_in') === 'true';
+    if (isAdmin) {
+      return { id: 'admin', name: 'Super Admin', email: 'admin@clothza.com', role: 'admin', adminRequest: 'none' };
+    }
+    return { id: 'guest-customer', name: 'Guest Customer', email: 'guest@clothza.com', role: 'customer', adminRequest: 'none' };
+  });
   const [favorites, setFavorites] = useState<{ products: string[]; stores: string[] }>({
     products: [],
     stores: [],
@@ -853,71 +864,21 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   // Load session and remote data on mount
   useEffect(() => {
-    // 1. Check active session and fetch currentUser profile
-    const getActiveSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        const { data: profile, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-        if (!error && profile) {
-          setCurrentUser(mapDbProfileToUser(profile));
-        }
-      } else {
-        // No session exists. Perform background auto-login if the user hasn't explicitly signed out and is running on localhost
-        const explicitlyLoggedOut = localStorage.getItem('clothza_logged_out') === 'true';
-        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        if (!explicitlyLoggedOut && isLocalhost) {
-          console.log('No active session found. Performing background auto-login as admin...');
-          try {
-            const { data, error } = await supabase.auth.signInWithPassword({
-              email: 'admin@clothza.com',
-              password: 'adminpassword123'
-            });
-            if (error) {
-              console.error('Background auto-login failed:', error.message);
-            } else if (data?.user) {
-              const { data: profile, error: profileErr } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', data.user.id)
-                .single();
-              if (!profileErr && profile) {
-                setCurrentUser(mapDbProfileToUser(profile));
-              }
-            }
-          } catch (err) {
-            console.error('Background auto-login exception:', err);
-          }
-        }
-      }
-    };
-    getActiveSession();
+    // 1. Handle secret admin auto-login link (fully client-side bypass)
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('auto_login_admin') === 'true') {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      console.log('Secret admin login triggered via URL parameter...');
+      localStorage.setItem('clothza_admin_logged_in', 'true');
+      setCurrentUser({ id: 'admin', name: 'Super Admin', email: 'admin@clothza.com', role: 'admin', adminRequest: 'none' });
+    }
 
-    // 2. Set up auth state change listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        const { data: profile, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-        if (!error && profile) {
-          setCurrentUser(mapDbProfileToUser(profile));
-        }
-      } else {
-        setCurrentUser(null);
-      }
-    });
-
-    // 3. Load other Supabase collections
+    // 2. Load other Supabase collections
     const loadData = async () => {
       try {
-        // Load public profiles to populate users state
-        let { data: dbProfiles } = await supabase.from('profiles').select('*');
-        if (dbProfiles) {
+        // Load public profiles to populate users state (fallbacks to mock users if table doesn't exist)
+        let { data: dbProfiles, error: profilesErr } = await supabase.from('profiles').select('*');
+        if (!profilesErr && dbProfiles) {
           setUsers(dbProfiles.map(mapDbProfileToUser));
         }
 
@@ -934,15 +895,16 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
             dbStores = seededStores;
           } else {
             console.error('Seeding stores failed:', seedStoresErr);
-            dbStores = DEFAULT_STORES.map(mapStoreToDbStore);
           }
         }
-        setStores((dbStores || []).map(mapDbStoreToStore));
+        if (dbStores) {
+          setStores(dbStores.map(mapDbStoreToStore));
+        }
 
         // 2. Load Products
         let { data: dbProducts, error: prodsErr } = await supabase.from('products').select('*');
         if (prodsErr || !dbProducts || dbProducts.length === 0) {
-          console.log('Seeding default products...');
+          console.log('Database empty, seeding default products...');
           const { data: seededProducts, error: seedProdsErr } = await supabase
             .from('products')
             .insert(DEFAULT_PRODUCTS.map(mapProductToDbProduct))
@@ -952,10 +914,11 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
             dbProducts = seededProducts;
           } else {
             console.error('Seeding products failed:', seedProdsErr);
-            dbProducts = DEFAULT_PRODUCTS.map(mapProductToDbProduct);
           }
         }
-        setProducts((dbProducts || []).map(mapDbProductToProduct));
+        if (dbProducts) {
+          setProducts(dbProducts.map(mapDbProductToProduct));
+        }
 
         // 3. Load Coupons
         let { data: dbCoupons } = await supabase.from('coupons').select('*');
@@ -1070,7 +1033,6 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       .subscribe();
 
     return () => {
-      subscription.unsubscribe();
       supabase.removeChannel(messagesChannel);
     };
   }, []);
@@ -1338,51 +1300,43 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   const signIn = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
-    localStorage.removeItem('clothza_logged_out');
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      return { success: false, error: error.message };
+    // Standard Supabase login is bypassed. Check if it's the admin details or log in guest
+    if (email === 'admin@clothza.com' && password === 'adminpassword123') {
+      localStorage.setItem('clothza_admin_logged_in', 'true');
+      setCurrentUser({ id: 'admin', name: 'Super Admin', email: 'admin@clothza.com', role: 'admin', adminRequest: 'none' });
+      return { success: true };
     }
-    return { success: true };
+    return { success: false, error: 'Invalid credentials. Please use the passcode gate or correct admin login.' };
   };
 
-  const signUp = async (name: string, email: string, password: string, role: User['role']): Promise<{ success: boolean; error?: string }> => {
-    localStorage.removeItem('clothza_logged_out');
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          name,
-          role
-        }
-      }
-    });
-    if (error) {
-      return { success: false, error: error.message };
-    }
+  const signUp = async (name: string, email: string, _password: string, _role: User['role']): Promise<{ success: boolean; error?: string }> => {
+    // Mock user sign up directly in local memory
+    const newUser: User = { id: `user-${Date.now()}`, name, email, role: 'customer', adminRequest: 'none' };
+    setUsers(prev => [...prev, newUser]);
+    setCurrentUser(newUser);
     return { success: true };
   };
 
   const signInWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
-    localStorage.removeItem('clothza_logged_out');
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin
-      }
-    });
-    if (error) {
-      return { success: false, error: error.message };
-    }
+    setCurrentUser({ id: 'guest-customer', name: 'Guest Customer', email: 'guest@clothza.com', role: 'customer', adminRequest: 'none' });
     return { success: true };
   };
 
   const signOut = async () => {
+    localStorage.removeItem('clothza_admin_logged_in');
     localStorage.setItem('clothza_logged_out', 'true');
-    await supabase.auth.signOut();
-    setCurrentUser(null);
+    setCurrentUser({ id: 'guest-customer', name: 'Guest Customer', email: 'guest@clothza.com', role: 'customer', adminRequest: 'none' });
     navigateToHome();
+  };
+
+  const unlockAdminAccess = (password: string): boolean => {
+    if (password === 'clothzaadmin2026') {
+      localStorage.setItem('clothza_admin_logged_in', 'true');
+      localStorage.removeItem('clothza_logged_out');
+      setCurrentUser({ id: 'admin', name: 'Super Admin', email: 'admin@clothza.com', role: 'admin', adminRequest: 'none' });
+      return true;
+    }
+    return false;
   };
 
   // Promotion feature (paid placement mockup)
@@ -1968,6 +1922,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         submitAdminRequest,
         approveAdminRequest,
         promoteToSellerDirect,
+        unlockAdminAccess,
       }}
     >
       {children}
