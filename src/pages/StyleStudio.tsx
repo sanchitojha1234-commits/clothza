@@ -3,7 +3,8 @@ import { useMarketplace, type Product } from '../context/MarketplaceContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Sparkles, Trash2, Layers, ZoomIn, ZoomOut, Move,
-  ShoppingBag, Check, Plus, RefreshCw, Bookmark
+  ShoppingBag, Check, Plus, RefreshCw, Bookmark,
+  RotateCw, FlipHorizontal, Map, Compass
 } from 'lucide-react';
 
 interface CanvasItem {
@@ -13,7 +14,11 @@ interface CanvasItem {
   y: number; // Percent from top (0 - 100)
   scale: number; // Scale multiplier (e.g. 1.0)
   zIndex: number;
+  rotate: number; // Rotation degrees (0 - 360)
+  isFlipped: boolean; // Horizontal mirror state
 }
+
+type SceneBackdrop = 'minimal' | 'cafe' | 'runway' | 'street';
 
 export const StyleStudio: React.FC = () => {
   const { products, addToCart, navigateToCheckout, addLookbook, currentUser } = useMarketplace();
@@ -22,6 +27,13 @@ export const StyleStudio: React.FC = () => {
   const [activeCategory, setActiveCategory] = useState<'all' | 'tops' | 'bottoms' | 'outerwear' | 'footwear'>('all');
   const [canvasItems, setCanvasItems] = useState<CanvasItem[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  
+  // Custom Backdrop Environment
+  const [scene, setScene] = useState<SceneBackdrop>('minimal');
+
+  // Dragging states
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+  const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
 
   // Lookbook creation states
   const [isSavingLookbook, setIsSavingLookbook] = useState(false);
@@ -51,7 +63,7 @@ export const StyleStudio: React.FC = () => {
   });
 
   // Action: Add product to canvas
-  const handleAddProductToCanvas = (product: Product) => {
+  const handleAddProductToCanvas = (product: Product, customX?: number, customY?: number, customZ?: number) => {
     const category = getProductCategory(product);
     
     // Assign reasonable default layering coordinates depending on item category
@@ -71,10 +83,12 @@ export const StyleStudio: React.FC = () => {
     const newItem: CanvasItem = {
       id: `canvas-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       product,
-      x: 50, // center
-      y: defaultY,
+      x: customX !== undefined ? customX : 50, // center
+      y: customY !== undefined ? customY : defaultY,
       scale: 1.0,
-      zIndex: defaultZIndex
+      zIndex: customZ !== undefined ? customZ : defaultZIndex,
+      rotate: 0,
+      isFlipped: false
     };
 
     setCanvasItems(prev => [...prev, newItem]);
@@ -97,6 +111,101 @@ export const StyleStudio: React.FC = () => {
     setSelectedItemId(null);
   };
 
+  // Pointer event handlers for mobile/desktop dragging (Unified Pointer API)
+  const handlePointerDown = (e: React.PointerEvent, item: CanvasItem) => {
+    e.preventDefault();
+    setSelectedItemId(item.id);
+    setDraggedItemId(item.id);
+
+    const canvasEl = document.getElementById('style-canvas-container');
+    if (!canvasEl) return;
+    const rect = canvasEl.getBoundingClientRect();
+
+    // Convert pointer coordinate to percentage of canvas dimension
+    const pointerX = ((e.clientX - rect.left) / rect.width) * 100;
+    const pointerY = ((e.clientY - rect.top) / rect.height) * 100;
+
+    // Calculate mouse click offset relative to current item percentage center
+    setDragStartOffset({
+      x: pointerX - item.x,
+      y: pointerY - item.y
+    });
+
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent, item: CanvasItem) => {
+    if (draggedItemId !== item.id) return;
+
+    const canvasEl = document.getElementById('style-canvas-container');
+    if (!canvasEl) return;
+    const rect = canvasEl.getBoundingClientRect();
+
+    const pointerX = ((e.clientX - rect.left) / rect.width) * 100;
+    const pointerY = ((e.clientY - rect.top) / rect.height) * 100;
+
+    let newX = Math.round(pointerX - dragStartOffset.x);
+    let newY = Math.round(pointerY - dragStartOffset.y);
+
+    // Keep item within visual boundaries
+    newX = Math.max(5, Math.min(95, newX));
+    newY = Math.max(5, Math.min(95, newY));
+
+    updateSelectedItem(it => ({ ...it, x: newX, y: newY }));
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    setDraggedItemId(null);
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+  };
+
+  // Style Presets - Loads pre-composed outfit dynamically searching your catalog!
+  const handleApplyPreset = (presetType: 'streetwear' | 'brunch' | 'gala') => {
+    handleClearCanvas();
+
+    // Find items matching tags/names in catalog
+    const findProduct = (cat: 'tops' | 'bottoms' | 'outerwear' | 'footwear', matchTerms: string[]): Product | undefined => {
+      return products.find(p => {
+        const pCat = getProductCategory(p);
+        if (pCat !== cat) return false;
+        const name = p.name.toLowerCase();
+        return matchTerms.some(term => name.includes(term));
+      }) || products.find(p => getProductCategory(p) === cat); // Fallback to first in category
+    };
+
+    if (presetType === 'streetwear') {
+      const coat = findProduct('outerwear', ['trench', 'jacket', 'coat']);
+      const top = findProduct('tops', ['knit', 'sweater', 'tee', 'hoodie']);
+      const bottom = findProduct('bottoms', ['jeans', 'pant', 'cargo']);
+      const shoes = findProduct('footwear', ['sneaker', 'boots', 'shoes']);
+
+      if (bottom) handleAddProductToCanvas(bottom, 50, 62, 3);
+      if (top) handleAddProductToCanvas(top, 50, 43, 4);
+      if (coat) handleAddProductToCanvas(coat, 50, 42, 5);
+      if (shoes) handleAddProductToCanvas(shoes, 50, 82, 2);
+    } 
+    else if (presetType === 'brunch') {
+      const top = findProduct('tops', ['blouse', 'shirt', 'linen']);
+      const bottom = findProduct('bottoms', ['skirt', 'trousers', 'pants']);
+      const shoes = findProduct('footwear', ['heel', 'sandal', 'shoes']);
+
+      if (bottom) handleAddProductToCanvas(bottom, 50, 60, 3);
+      if (top) handleAddProductToCanvas(top, 50, 42, 4);
+      if (shoes) handleAddProductToCanvas(shoes, 50, 81, 2);
+    } 
+    else { // gala
+      const coat = findProduct('outerwear', ['blazer', 'suit', 'jacket']);
+      const top = findProduct('tops', ['shirt', 'knit']);
+      const bottom = findProduct('bottoms', ['pants', 'trousers']);
+      const shoes = findProduct('footwear', ['boots', 'shoes', 'oxford']);
+
+      if (bottom) handleAddProductToCanvas(bottom, 50, 64, 3);
+      if (top) handleAddProductToCanvas(top, 50, 45, 4);
+      if (coat) handleAddProductToCanvas(coat, 50, 43, 5);
+      if (shoes) handleAddProductToCanvas(shoes, 50, 83, 2);
+    }
+  };
+
   // Action: Add all outfit items to shopping cart and proceed to Checkout
   const handleBuyOutfit = () => {
     if (canvasItems.length === 0) {
@@ -105,7 +214,6 @@ export const StyleStudio: React.FC = () => {
     }
     
     canvasItems.forEach(item => {
-      // Add items with default size and color from its variants list
       const size = item.product.variants?.[0]?.size || 'M';
       const color = item.product.variants?.[0]?.color || 'Default';
       addToCart(item.product.id, size, color, 1);
@@ -159,6 +267,21 @@ export const StyleStudio: React.FC = () => {
   const totalPrice = canvasItems.reduce((sum, item) => sum + item.product.price, 0);
   const selectedItem = canvasItems.find(item => item.id === selectedItemId);
 
+  // Background CSS styles mapping based on selected scene
+  const getSceneBackgroundClass = () => {
+    switch(scene) {
+      case 'cafe':
+        return 'bg-gradient-to-b from-[#4d3227] to-[#1c120c] border-[#ffd5a1]/20';
+      case 'runway':
+        return 'bg-gradient-to-b from-[#1a1c24] via-[#090b10] to-[#010103] border-cyan-500/20';
+      case 'street':
+        return 'bg-gradient-to-b from-[#3a3d46] to-[#191a1f] border-red-500/20';
+      case 'minimal':
+      default:
+        return 'bg-bg-secondary border-border-main';
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 min-h-[90vh] space-y-8 font-sans">
       
@@ -167,10 +290,10 @@ export const StyleStudio: React.FC = () => {
         <div>
           <h1 className="text-2xl font-serif font-bold text-text-primary tracking-tight flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-accent-main animate-pulse" />
-            <span>Style Studio</span>
+            <span>Advanced Style Studio</span>
           </h1>
           <p className="text-xs text-text-secondary">
-            Visual Dress-up Room: Mix-and-match apparel overlays from boutiques and bundle checkout
+            Drag & drop items onto the canvas, rotate, flip, and customize styling environments.
           </p>
         </div>
 
@@ -189,6 +312,34 @@ export const StyleStudio: React.FC = () => {
           >
             <Bookmark className="w-3.5 h-3.5" />
             <span>Save Outfit</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Preset Inspirations Row */}
+      <div className="p-4 bg-card-main border border-border-main rounded-3xl space-y-3">
+        <h3 className="text-xs font-semibold text-text-secondary flex items-center gap-1.5">
+          <Compass className="w-3.5 h-3.5 text-accent-main" />
+          <span>Style Preset Templates (Auto-Compose Layouts)</span>
+        </h3>
+        <div className="flex gap-2.5">
+          <button
+            onClick={() => handleApplyPreset('streetwear')}
+            className="px-3.5 py-1.5 bg-bg-secondary hover:bg-bg-tertiary text-text-primary text-[10px] font-bold uppercase rounded-xl border border-border-main cursor-pointer"
+          >
+            😎 Streetwear Vibe
+          </button>
+          <button
+            onClick={() => handleApplyPreset('brunch')}
+            className="px-3.5 py-1.5 bg-bg-secondary hover:bg-bg-tertiary text-text-primary text-[10px] font-bold uppercase rounded-xl border border-border-main cursor-pointer"
+          >
+            ☕ Summer Brunch
+          </button>
+          <button
+            onClick={() => handleApplyPreset('gala')}
+            className="px-3.5 py-1.5 bg-bg-secondary hover:bg-bg-tertiary text-text-primary text-[10px] font-bold uppercase rounded-xl border border-border-main cursor-pointer"
+          >
+            ✨ Kathmandu Gala
           </button>
         </div>
       </div>
@@ -217,7 +368,7 @@ export const StyleStudio: React.FC = () => {
           </div>
 
           {/* Product Items List */}
-          <div className="space-y-3.5 max-h-[500px] overflow-y-auto pr-1">
+          <div className="space-y-3.5 max-h-[480px] overflow-y-auto pr-1">
             {filteredProducts.length === 0 ? (
               <p className="text-[11px] text-text-tertiary py-8 text-center">No apparel items in this category.</p>
             ) : (
@@ -249,12 +400,56 @@ export const StyleStudio: React.FC = () => {
           </div>
         </div>
 
-        {/* Draggable Style Canvas - Center Column (lg:5) */}
+        {/* Visual Styling Canvas - Center Column (lg:5) */}
         <div className="lg:col-span-5 flex flex-col gap-4">
-          <div className="relative w-full aspect-[3/4] bg-bg-secondary border border-border-main rounded-3xl overflow-hidden shadow-inner flex items-center justify-center">
+          
+          {/* Backdrop Environment Switcher */}
+          <div className="flex items-center justify-between p-3 bg-card-main border border-border-main rounded-2xl text-xs">
+            <span className="font-semibold text-text-secondary flex items-center gap-1.5">
+              <Map className="w-3.5 h-3.5 text-accent-main" /> Backdrop Scene:
+            </span>
+            <div className="flex gap-1.5">
+              {(['minimal', 'cafe', 'runway', 'street'] as const).map(sc => (
+                <button
+                  key={sc}
+                  onClick={() => setScene(sc)}
+                  className={`px-2 py-1 rounded-lg text-[9px] uppercase tracking-wider font-bold transition-all cursor-pointer ${
+                    scene === sc
+                      ? 'bg-text-primary text-bg-primary font-bold'
+                      : 'bg-bg-secondary text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  {sc}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Interactive Styling Board */}
+          <div 
+            id="style-canvas-container"
+            onClick={() => setSelectedItemId(null)}
+            className={`relative w-full aspect-[3/4] border rounded-3xl overflow-hidden shadow-2xl flex items-center justify-center transition-all duration-300 ${getSceneBackgroundClass()}`}
+          >
             
             {/* Mannequin Silhouette Background */}
-            <div className="absolute inset-0 flex items-center justify-center opacity-10 pointer-events-none select-none">
+            <div className="absolute inset-0 flex items-center justify-center opacity-15 pointer-events-none select-none z-0">
+              {scene === 'cafe' && (
+                <div className="absolute top-4 inset-x-0 flex justify-around text-yellow-300/40 text-[9px] font-bold tracking-widest animate-pulse uppercase">
+                  <span>✨ Kathmandu Coffee Lounge ✨</span>
+                </div>
+              )}
+              {scene === 'runway' && (
+                <div className="absolute inset-x-0 bottom-4 text-center text-cyan-400/40 text-[9px] font-bold tracking-widest animate-pulse uppercase">
+                  <span>⚡ Runway Spotlight On ⚡</span>
+                </div>
+              )}
+              {scene === 'street' && (
+                <div className="absolute inset-0 flex flex-col justify-between p-4 text-red-500/20 text-[9px] font-bold font-mono tracking-widest uppercase">
+                  <span>[LAZIMPAT BOULEVARD]</span>
+                  <span className="text-right">[STREETSTYLE EDIT]</span>
+                </div>
+              )}
               <svg className="w-2/3 h-2/3 text-text-primary" viewBox="0 0 100 100" fill="currentColor">
                 <circle cx="50" cy="18" r="7" />
                 <path d="M50 26c-10 0-16 4-18 10l-2 15c-1 3 1 5 3 4l4-2v27c0 3 2 5 5 5h16c3 0 5-2 5-5V53l4 2c2 1 4-1 3-4l-2-15c-2-6-8-10-18-10z" />
@@ -265,60 +460,55 @@ export const StyleStudio: React.FC = () => {
 
             {/* Instruction placeholder when empty */}
             {canvasItems.length === 0 && (
-              <div className="absolute text-center p-6 space-y-2 pointer-events-none">
-                <p className="font-serif text-sm text-text-secondary">Your Canvas is Empty</p>
+              <div className="absolute text-center p-6 space-y-2 pointer-events-none z-10">
+                <p className="font-serif text-sm text-text-secondary">Visual Styling Room</p>
                 <p className="text-[10px] text-text-tertiary max-w-xs mx-auto">
-                  Click the "+" buttons on catalog items to place them on the styling room mannequin.
+                  Click "+ Add" on items, then drag them on the canvas directly to style your look!
                 </p>
               </div>
             )}
 
-            {/* Canvas Items Rendering */}
-            <AnimatePresence>
-              {canvasItems.map((item) => {
-                const isSelected = item.id === selectedItemId;
-                return (
-                  <motion.div
-                    key={item.id}
-                    initial={{ opacity: 0, scale: 0.6 }}
-                    animate={{ opacity: 1, scale: item.scale }}
-                    exit={{ opacity: 0, scale: 0.6 }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedItemId(item.id);
-                    }}
-                    style={{
-                      position: 'absolute',
-                      left: `${item.x}%`,
-                      top: `${item.y}%`,
-                      transform: 'translate(-50%, -50%)',
-                      zIndex: item.zIndex,
-                    }}
-                    className={`cursor-pointer group transition-shadow ${
-                      isSelected 
-                        ? 'ring-2 ring-accent-main rounded-2xl shadow-xl' 
-                        : 'hover:ring-1 hover:ring-accent-main/40 hover:rounded-2xl'
-                    }`}
-                  >
-                    <img 
-                      src={item.product.images?.[0] || 'https://via.placeholder.com/150'} 
-                      alt={item.product.name}
-                      className="w-24 h-24 sm:w-28 sm:h-28 object-contain select-none pointer-events-none"
-                    />
-                    
-                    {isSelected && (
-                      <div className="absolute -top-2 -right-2 bg-accent-main text-accent-fg p-1 rounded-full shadow">
-                        <Check className="w-2.5 h-2.5" />
-                      </div>
-                    )}
-                  </motion.div>
-                );
-              })}
-            </AnimatePresence>
+            {/* Interactive Drag/Resize element layers */}
+            {canvasItems.map((item) => {
+              const isSelected = item.id === selectedItemId;
+              return (
+                <div
+                  key={item.id}
+                  onPointerDown={(e) => handlePointerDown(e, item)}
+                  onPointerMove={(e) => handlePointerMove(e, item)}
+                  onPointerUp={(e) => handlePointerUp(e)}
+                  style={{
+                    position: 'absolute',
+                    left: `${item.x}%`,
+                    top: `${item.y}%`,
+                    transform: `translate(-50%, -50%) scale(${item.scale}) scaleX(${item.isFlipped ? -1 : 1}) rotate(${item.rotate}deg)`,
+                    zIndex: item.zIndex,
+                    touchAction: 'none' // Prevent browser scrolling while dragging
+                  }}
+                  className={`cursor-grab active:cursor-grabbing group select-none transition-shadow ${
+                    isSelected 
+                      ? 'ring-2 ring-accent-main rounded-2xl shadow-2xl p-1 bg-white/5 backdrop-blur-[1px]' 
+                      : 'hover:ring-1 hover:ring-accent-main/40 hover:rounded-2xl'
+                  }`}
+                >
+                  <img 
+                    src={item.product.images?.[0] || 'https://via.placeholder.com/150'} 
+                    alt={item.product.name}
+                    className="w-24 h-24 sm:w-28 sm:h-28 object-contain pointer-events-none"
+                  />
+                  
+                  {isSelected && (
+                    <div className="absolute -top-2.5 -right-2.5 bg-accent-main text-accent-fg p-1.5 rounded-full shadow border border-bg-primary">
+                      <Check className="w-2.5 h-2.5" />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {/* Draggable Transformation Control Console */}
-          <div className="bg-card-main border border-border-main rounded-3xl p-4 space-y-4">
+          <div className="bg-card-main border border-border-main rounded-3xl p-4 space-y-4 shadow-sm">
             <h3 className="text-xs font-bold text-text-secondary uppercase tracking-wider flex justify-between items-center">
               <span>Canvas Tool Controls</span>
               {selectedItem && (
@@ -330,7 +520,8 @@ export const StyleStudio: React.FC = () => {
 
             {selectedItem ? (
               <div className="grid grid-cols-2 gap-4">
-                {/* Movement Coordinates Control Panel */}
+                
+                {/* Position Controls */}
                 <div className="space-y-2">
                   <span className="text-[10px] font-bold text-text-tertiary flex items-center gap-1">
                     <Move className="w-3 h-3" /> Position Coordinates
@@ -338,31 +529,31 @@ export const StyleStudio: React.FC = () => {
                   <div className="grid grid-cols-3 gap-1 max-w-[140px]">
                     <div />
                     <button 
-                      onClick={() => updateSelectedItem(it => ({ ...it, y: Math.max(10, it.y - 4) }))}
-                      className="p-1 rounded bg-bg-secondary hover:bg-bg-tertiary text-text-primary text-[10px] font-bold cursor-pointer text-center"
+                      onClick={() => updateSelectedItem(it => ({ ...it, y: Math.max(5, it.y - 3) }))}
+                      className="p-1.5 rounded bg-bg-secondary hover:bg-bg-tertiary text-text-primary text-[10px] font-bold cursor-pointer text-center"
                     >
                       ▲
                     </button>
                     <div />
                     
                     <button 
-                      onClick={() => updateSelectedItem(it => ({ ...it, x: Math.max(10, it.x - 4) }))}
-                      className="p-1 rounded bg-bg-secondary hover:bg-bg-tertiary text-text-primary text-[10px] font-bold cursor-pointer text-center"
+                      onClick={() => updateSelectedItem(it => ({ ...it, x: Math.max(5, it.x - 3) }))}
+                      className="p-1.5 rounded bg-bg-secondary hover:bg-bg-tertiary text-text-primary text-[10px] font-bold cursor-pointer text-center"
                     >
                       ◀
                     </button>
-                    <div className="p-1 text-center text-[10px] text-text-tertiary font-bold select-none">XY</div>
+                    <div className="p-1.5 text-center text-[10px] text-text-tertiary font-bold select-none">XY</div>
                     <button 
-                      onClick={() => updateSelectedItem(it => ({ ...it, x: Math.min(90, it.x + 4) }))}
-                      className="p-1 rounded bg-bg-secondary hover:bg-bg-tertiary text-text-primary text-[10px] font-bold cursor-pointer text-center"
+                      onClick={() => updateSelectedItem(it => ({ ...it, x: Math.min(95, it.x + 3) }))}
+                      className="p-1.5 rounded bg-bg-secondary hover:bg-bg-tertiary text-text-primary text-[10px] font-bold cursor-pointer text-center"
                     >
                       ▶
                     </button>
                     
                     <div />
                     <button 
-                      onClick={() => updateSelectedItem(it => ({ ...it, y: Math.min(90, it.y + 4) }))}
-                      className="p-1 rounded bg-bg-secondary hover:bg-bg-tertiary text-text-primary text-[10px] font-bold cursor-pointer text-center"
+                      onClick={() => updateSelectedItem(it => ({ ...it, y: Math.min(95, it.y + 3) }))}
+                      className="p-1.5 rounded bg-bg-secondary hover:bg-bg-tertiary text-text-primary text-[10px] font-bold cursor-pointer text-center"
                     >
                       ▼
                     </button>
@@ -372,7 +563,7 @@ export const StyleStudio: React.FC = () => {
 
                 {/* Layering & Scale Scaling Slider tools */}
                 <div className="space-y-3.5">
-                  {/* Scaling Scale */}
+                  {/* Size Scale */}
                   <div className="space-y-1">
                     <span className="text-[10px] font-bold text-text-tertiary flex items-center gap-1">
                       <ZoomIn className="w-3 h-3" /> Size Scale
@@ -382,7 +573,7 @@ export const StyleStudio: React.FC = () => {
                         onClick={() => updateSelectedItem(it => ({ ...it, scale: Math.max(0.5, it.scale - 0.1) }))}
                         className="p-1 rounded bg-bg-secondary hover:bg-bg-tertiary text-text-secondary cursor-pointer"
                       >
-                        <ZoomOut className="w-3 h-3" />
+                        <ZoomOut className="w-3.5 h-3.5" />
                       </button>
                       <span className="text-[10px] text-text-primary font-bold min-w-[30px] text-center">
                         {Math.round(selectedItem.scale * 100)}%
@@ -391,20 +582,57 @@ export const StyleStudio: React.FC = () => {
                         onClick={() => updateSelectedItem(it => ({ ...it, scale: Math.min(2.0, it.scale + 0.1) }))}
                         className="p-1 rounded bg-bg-secondary hover:bg-bg-tertiary text-text-secondary cursor-pointer"
                       >
-                        <ZoomIn className="w-3 h-3" />
+                        <ZoomIn className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
 
-                  {/* ZIndex Layering */}
+                  {/* Rotation Tool */}
                   <div className="space-y-1">
                     <span className="text-[10px] font-bold text-text-tertiary flex items-center gap-1">
-                      <Layers className="w-3 h-3" /> Z-Index Layer
+                      <RotateCw className="w-3 h-3" /> Rotate Element
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="360"
+                        value={selectedItem.rotate}
+                        onChange={(e) => updateSelectedItem(it => ({ ...it, rotate: parseInt(e.target.value) }))}
+                        className="w-full accent-accent-main cursor-pointer"
+                      />
+                      <span className="text-[9px] text-text-primary font-mono min-w-[25px] text-right">{selectedItem.rotate}°</span>
+                    </div>
+                  </div>
+
+                  {/* Flip / Layer / Trash row */}
+                  <div className="grid grid-cols-2 gap-1.5 pt-1">
+                    <button
+                      onClick={() => updateSelectedItem(it => ({ ...it, isFlipped: !it.isFlipped }))}
+                      className="py-1 px-2 bg-bg-secondary hover:bg-bg-tertiary border border-border-main/60 text-text-secondary hover:text-text-primary font-bold text-[9px] rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                      title="Mirror Flip"
+                    >
+                      <FlipHorizontal className="w-3 h-3" />
+                      <span>Flip</span>
+                    </button>
+                    <button
+                      onClick={() => handleRemoveItem(selectedItem.id)}
+                      className="py-1 px-2 bg-red-500/10 hover:bg-red-500/15 border border-red-500/20 text-red-500 font-bold text-[9px] rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Delete</span>
+                    </button>
+                  </div>
+
+                  {/* ZIndex Depth */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-text-tertiary flex items-center gap-1">
+                      <Layers className="w-3 h-3" /> Layer Depth
                     </span>
                     <div className="flex items-center gap-2">
                       <button 
                         onClick={() => updateSelectedItem(it => ({ ...it, zIndex: Math.max(1, it.zIndex - 1) }))}
-                        className="px-2 py-0.5 rounded bg-bg-secondary hover:bg-bg-tertiary text-text-secondary text-[10px] font-bold cursor-pointer"
+                        className="px-2 py-0.5 rounded bg-bg-secondary hover:bg-bg-tertiary text-text-secondary text-[9px] font-bold cursor-pointer"
                       >
                         Back
                       </button>
@@ -413,26 +641,18 @@ export const StyleStudio: React.FC = () => {
                       </span>
                       <button 
                         onClick={() => updateSelectedItem(it => ({ ...it, zIndex: Math.min(20, it.zIndex + 1) }))}
-                        className="px-2 py-0.5 rounded bg-bg-secondary hover:bg-bg-tertiary text-text-secondary text-[10px] font-bold cursor-pointer"
+                        className="px-2 py-0.5 rounded bg-bg-secondary hover:bg-bg-tertiary text-text-secondary text-[9px] font-bold cursor-pointer"
                       >
                         Front
                       </button>
                     </div>
                   </div>
 
-                  {/* Trash */}
-                  <button
-                    onClick={() => handleRemoveItem(selectedItem.id)}
-                    className="w-full py-1.5 bg-red-500/10 hover:bg-red-500/15 border border-red-500/20 text-red-500 font-bold text-[10px] rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    <span>Delete Layer</span>
-                  </button>
                 </div>
               </div>
             ) : (
               <p className="text-[10px] text-text-tertiary py-4 text-center leading-relaxed">
-                Click any item placed on the mannequin canvas above to activate transform, layering, and scale tools.
+                *Stylist Tip: You can drag clothes directly on the canvas using your mouse or finger! Click any layer to rotate, flip, resize, or delete it.
               </p>
             )}
           </div>
